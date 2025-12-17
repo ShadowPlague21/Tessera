@@ -712,7 +712,77 @@ async def get_capabilities():
 
 ---
 
-## 4. Rate Limiter Implementation
+## 4. Worker Implementation (KoboldCPP)
+
+```python
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import httpx
+import asyncio
+
+app = FastAPI()
+
+class KoboldCPPWorker:
+    def __init__(self, worker_id: str, kobold_url: str):
+        self.worker_id = worker_id
+        self.kobold_url = kobold_url  # e.g., http://localhost:5001
+        self.current_job = None
+
+    async def generate_text(self, prompt: str, max_tokens: int, temperature: float = 0.7):
+        """Generate text using KoboldCPP API."""
+        payload = {
+            "prompt": prompt,
+            "max_length": max_tokens,
+            "temperature": temperature,
+            "rep_pen": 1.1
+        }
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(f"{self.kobold_url}/api/v1/generate", json=payload, timeout=60)
+            resp.raise_for_status()
+            return resp.json()["results"][0]["text"]
+
+@app.post("/worker/run_job")
+async def run_job(request: dict):
+    """Execute a text generation job."""
+    job_id = request["job_id"]
+    params = request["params"]
+    
+    worker = get_worker()
+    worker.current_job = job_id
+    
+    try:
+        text_output = await worker.generate_text(
+            prompt=params["prompt"],
+            max_tokens=params.get("max_tokens", 200),
+            temperature=params.get("temperature", 0.7)
+        )
+        
+        return {
+            "status": "completed",
+            "job_id": job_id,
+            "execution_time_seconds": 1.5, # Placeholder
+            "artifacts": [{
+                "type": "text",
+                "path": None, # Text is inline
+                "url": None,
+                "metadata": {"text_content": text_output},
+                "format": "txt"
+            }]
+        }
+    except Exception as e:
+         return {
+            "status": "failed",
+            "job_id": job_id,
+            "error": {"code": "GEN_ERROR", "message": str(e)}
+        }
+    finally:
+        worker.current_job = None
+```
+
+---
+
+## 5. Rate Limiter Implementation
 
 ```python
 from collections import defaultdict
